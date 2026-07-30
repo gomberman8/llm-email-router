@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
+from pydantic_ai.settings import ModelSettings
 
 from app.agent.departments import Department
 from app.agent.prompt import SYSTEM_PROMPT
@@ -43,6 +44,7 @@ def build_agent(
     model = OllamaModel(
         model_name or settings.ollama_model,
         provider=OllamaProvider(base_url=settings.ollama_base_url),
+        settings=ModelSettings(timeout=settings.ollama_timeout),
     )
     agent: Agent[RoutingDeps, str] = Agent(
         model, deps_type=RoutingDeps, system_prompt=system_prompt

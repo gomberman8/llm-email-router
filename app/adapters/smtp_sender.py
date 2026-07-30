@@ -2,6 +2,8 @@ import smtplib
 from email.message import EmailMessage
 from email.utils import make_msgid
 
+from app.exceptions import EmailDeliveryError
+
 
 class SmtpEmailSender:
     def __init__(self, host: str, port: int, mail_from: str, timeout: int):
@@ -19,7 +21,10 @@ class SmtpEmailSender:
         message["Message-Id"] = make_msgid()
         message.set_content(body)
 
-        with smtplib.SMTP(self._host, self._port, timeout=self._timeout) as smtp:
-            smtp.send_message(message)
+        try:
+            with smtplib.SMTP(self._host, self._port, timeout=self._timeout) as smtp:
+                smtp.send_message(message)
+        except OSError as e:
+            raise EmailDeliveryError("Failed to deliver email") from e
 
         return message["Message-Id"]

@@ -21,7 +21,7 @@ Rozstrzyganie przypadków granicznych:
 - Reset zapomnianego hasła to help-desk. Założenie konta lub zmiana uprawnień to it.
 - Gdy wiadomość pasuje do dwóch działów, wybierz ten, który załatwi sprawę bez
   przekazywania jej dalej.
-- Wybieraj other tylko wtedy, gdy żaden z czterech pozostałych działów nie jest właściwy.
+- Wybieraj other tylko wtedy, gdy żaden z pozostałych działów nie jest właściwy.
   Nie używaj other dlatego, że wiadomość jest krótka albo nieprecyzyjna.
 
 Zasady odpowiedzi:

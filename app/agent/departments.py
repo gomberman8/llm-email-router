@@ -1,9 +1,9 @@
-from enum import Enum
+from enum import StrEnum
 
 from app.config import settings
 
 
-class Department(str, Enum):
+class Department(StrEnum):
     KADRY = "kadry"
     HUMAN_RESOURCES = "human-resources"
     HELP_DESK = "help-desk"

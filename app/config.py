@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     agent_retries: NonNegativeInt = 1
     warmup_on_startup: bool = True
+    ready_timeout: PositiveInt = 5
 
     log_level: LogLevel = "INFO"
 
