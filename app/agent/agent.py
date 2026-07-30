@@ -70,12 +70,17 @@ agent = build_agent(SYSTEM_PROMPT)
 
 
 async def route_message(
-    message: str, sender_email: str, email_sender: EmailSender
+    message: str,
+    sender_email: str,
+    email_sender: EmailSender,
+    *,
+    routing_agent: Agent[RoutingDeps, str] | None = None,
 ) -> RoutingResult:
+    _agent = routing_agent or agent
     for attempt in range(1 + settings.agent_retries):
         deps = RoutingDeps(sender_email=sender_email, email_sender=email_sender)
         prompt = message if attempt == 0 else f"{message}\n\n{RETRY_NUDGE}"
-        result = await agent.run(prompt, deps=deps)
+        result = await _agent.run(prompt, deps=deps)
         if deps.routed is not None:
             return RoutingResult(
                 department=deps.routed.department,
