@@ -7,6 +7,7 @@ from app.agent.departments import Department
 class Case:
     message: str
     expected: Department
+    holdout: bool = False
 
 
 CASES: list[Case] = [
@@ -136,5 +137,36 @@ CASES: list[Case] = [
     Case(
         message="Nie mam dostępu do firmowego dysku sieciowego. Próbuję jak zwykle, ale dostęp jest odmówiony.",
         expected=Department.IT,
+    ),
+    # --- holdout: nie były widoczne podczas strojenia promptu ---
+    Case(
+        message="Przysługuje mi urlop okolicznościowy z tytułu ślubu. Ile dni i co muszę dostarczyć?",
+        expected=Department.KADRY,
+        holdout=True,
+    ),
+    Case(
+        message="Słyszałem że firma wprowadza roczne oceny pracownicze. Chciałbym wiedzieć jak bedzie wyglądał ten proces i kiedy startuje.",
+        expected=Department.HUMAN_RESOURCES,
+        holdout=True,
+    ),
+    Case(
+        message="Klawisz Fn na klawiaturze służbowej nie działa — nie mogę regulować jasności ekranu ani głośności.",
+        expected=Department.HELP_DESK,
+        holdout=True,
+    ),
+    Case(
+        message="Nasz dział handlowy ma od przyszłego miesiąca korzystać z nowego systemu CRM. Jak uzyskać dostęp dla całego zespołu?",
+        expected=Department.IT,
+        holdout=True,
+    ),
+    Case(
+        message="Chciałbym zarezerwować salę konferencyjną na czwartek, ok. 10 osób, spotkanie z klientem. Jak to zrobić?",
+        expected=Department.OTHER,
+        holdout=True,
+    ),
+    Case(
+        message="Pracuję w firmie już 6 lat. Czy nabywam prawo do dłuższego urlopu wypoczynkowego i o ile dni?",
+        expected=Department.KADRY,
+        holdout=True,
     ),
 ]

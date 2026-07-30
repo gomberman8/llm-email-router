@@ -11,57 +11,35 @@ from app.config import settings
 from eval.dataset import CASES, Case
 
 
-async def run_eval(model_name: str | None) -> None:
-    eval_agent = build_agent(SYSTEM_PROMPT, model_name)
-    effective_model = model_name or settings.ollama_model
+def _report_section(
+    results: list[tuple[Case, RoutingResult, float]],
+    all_depts: list[Department],
+    title: str,
+) -> list[str]:
+    lines: list[str] = []
+    if not results:
+        lines.append(f"\n### {title}\n")
+        lines.append("_Brak przypadków._\n")
+        return lines
 
-    run_results: list[tuple[Case, RoutingResult, float]] = []
-
-    t_start = time.monotonic()
-    for i, case in enumerate(CASES, 1):
-        t0 = time.monotonic()
-        email_sender = InMemoryEmailSender()
-        result = await route_message(
-            case.message, "eval@example.com", email_sender, routing_agent=eval_agent
-        )
-        elapsed = time.monotonic() - t0
-        run_results.append((case, result, elapsed))
-        ok = result.department == case.expected
-        print(
-            f"  [{i:02d}/{len(CASES)}] {'OK  ' if ok else 'FAIL'}"
-            f"  {case.expected.value:<15} → {result.department.value}"
-        )
-
-    total_time = time.monotonic() - t_start
-    total = len(run_results)
-    correct = sum(1 for c, r, _ in run_results if r.department == c.expected)
-    agent_count = sum(1 for _, r, _ in run_results if r.routed_by == "agent")
+    total = len(results)
+    correct = sum(1 for c, r, _ in results if r.department == c.expected)
 
     dept_correct: dict[Department, int] = defaultdict(int)
     dept_total: dict[Department, int] = defaultdict(int)
-    for case, result, _ in run_results:
+    for case, result, _ in results:
         dept_total[case.expected] += 1
         if result.department == case.expected:
             dept_correct[case.expected] += 1
 
     confusion: dict[tuple[Department, Department], int] = defaultdict(int)
-    for case, result, _ in run_results:
+    for case, result, _ in results:
         confusion[(case.expected, result.department)] += 1
 
-    all_depts = list(Department)
-    errors = [(c, r) for c, r, _ in run_results if r.department != c.expected]
+    errors = [(c, r) for c, r, _ in results if r.department != c.expected]
 
-    lines: list[str] = []
-    lines.append(f"## Eval — model: `{effective_model}`\n")
-    lines.append(
-        f"**Zbiór:** {total} wiadomości &nbsp;|&nbsp; "
-        f"**Accuracy:** {correct}/{total} = {correct / total:.0%} &nbsp;|&nbsp; "
-        f"**Czas łączny:** {total_time:.1f}s &nbsp;|&nbsp; "
-        f"**Średni:** {total_time / total:.1f}s/msg &nbsp;|&nbsp; "
-        f"**Agent:** {agent_count} &nbsp;|&nbsp; **Fallback:** {total - agent_count}\n"
-    )
-
-    lines.append("### Accuracy per dział\n")
+    acc_str = f"{correct}/{total} = {correct / total:.0%}"
+    lines.append(f"\n### {title} ({total} przypadków, {acc_str})\n")
     lines.append("| Dział | Poprawne | Łącznie | Accuracy |")
     lines.append("|---|---:|---:|---:|")
     for dept in all_depts:
@@ -71,8 +49,7 @@ async def run_eval(model_name: str | None) -> None:
         acc = dept_correct[dept] / n
         lines.append(f"| `{dept.value}` | {dept_correct[dept]} | {n} | {acc:.0%} |")
 
-    lines.append("\n### Macierz pomyłek\n")
-    lines.append("Wiersze = oczekiwany, kolumny = otrzymany.\n")
+    lines.append("\n**Macierz pomyłek** (wiersze = oczekiwany, kolumny = otrzymany)\n")
     header = "| |" + "".join(f" `{d.value}` |" for d in all_depts)
     sep = "|---|" + "---:|" * len(all_depts)
     lines.append(header)
@@ -92,7 +69,7 @@ async def run_eval(model_name: str | None) -> None:
         lines.append(row)
 
     if errors:
-        lines.append(f"\n### Pomyłki ({len(errors)}) — materiał do strojenia promptu\n")
+        lines.append(f"\n**Pomyłki ({len(errors)})**\n")
         for i, (case, result) in enumerate(errors, 1):
             snippet = case.message[:150].replace("\n", " ")
             if len(case.message) > 150:
@@ -105,6 +82,63 @@ async def run_eval(model_name: str | None) -> None:
     else:
         lines.append("\n_Brak pomyłek._\n")
 
+    return lines
+
+
+async def run_eval(model_name: str | None, limit: int | None = None) -> None:
+    eval_agent = build_agent(SYSTEM_PROMPT, model_name)
+    effective_model = model_name or settings.ollama_model
+
+    cases = CASES[:limit] if limit is not None else CASES
+    run_results: list[tuple[Case, RoutingResult, float]] = []
+
+    t_start = time.monotonic()
+    for i, case in enumerate(cases, 1):
+        t0 = time.monotonic()
+        email_sender = InMemoryEmailSender()
+        result = await route_message(
+            case.message, "eval@example.com", email_sender, routing_agent=eval_agent
+        )
+        elapsed = time.monotonic() - t0
+        run_results.append((case, result, elapsed))
+        ok = result.department == case.expected
+        holdout_tag = " [H]" if case.holdout else ""
+        print(
+            f"  [{i:02d}/{len(cases)}] {'OK  ' if ok else 'FAIL'}"
+            f"  {case.expected.value:<15} → {result.department.value}{holdout_tag}"
+        )
+
+    total_time = time.monotonic() - t_start
+    total = len(run_results)
+    agent_count = sum(1 for _, r, _ in run_results if r.routed_by == "agent")
+
+    tuning = [(c, r, t) for c, r, t in run_results if not c.holdout]
+    holdout = [(c, r, t) for c, r, t in run_results if c.holdout]
+
+    t_correct = sum(1 for c, r, _ in tuning if r.department == c.expected)
+    t_total = len(tuning)
+    h_correct = sum(1 for c, r, _ in holdout if r.department == c.expected)
+    h_total = len(holdout)
+
+    holdout_str = (
+        f"{h_correct}/{h_total} = {h_correct / h_total:.0%}" if h_total > 0 else "n/d"
+    )
+
+    all_depts = list(Department)
+    lines: list[str] = []
+    lines.append(f"## Eval — model: `{effective_model}`\n")
+    lines.append(
+        f"**Strojony:** {t_correct}/{t_total} = {t_correct / t_total:.0%}"
+        f" &nbsp;|&nbsp; **Holdout:** {holdout_str}"
+        f" &nbsp;|&nbsp; **Czas łączny:** {total_time:.1f}s"
+        f" &nbsp;|&nbsp; **Średni:** {total_time / total:.1f}s/msg"
+        f" &nbsp;|&nbsp; **Agent:** {agent_count}"
+        f" &nbsp;|&nbsp; **Fallback:** {total - agent_count}\n"
+    )
+
+    lines.extend(_report_section(tuning, all_depts, "Zbiór strojony"))
+    lines.extend(_report_section(holdout, all_depts, "Holdout"))
+
     print("\n" + "\n".join(lines))
 
 
@@ -115,8 +149,15 @@ def main() -> None:
         default=None,
         help="Nazwa modelu Ollama (domyślnie: settings.ollama_model)",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Ogranicz do pierwszych N przypadków",
+    )
     args = parser.parse_args()
-    asyncio.run(run_eval(args.model))
+    asyncio.run(run_eval(args.model, limit=args.limit))
 
 
 if __name__ == "__main__":

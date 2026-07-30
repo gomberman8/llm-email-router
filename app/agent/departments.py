@@ -36,11 +36,13 @@ DEPARTMENT_SCOPES: dict[Department, str] = {
         "Infrastruktura, systemy i bezpieczeństwo. Sprawy wykraczające poza jedno "
         "stanowisko: awarie sieci i usług dotyczące wielu osób, serwery i VPN, "
         "zakładanie kont i nadawanie uprawnień, incydenty bezpieczeństwa i podejrzane "
-        "wiadomości, zamawianie nowego sprzętu i licencji."
+        "wiadomości, zamawianie nowego sprzętu informatycznego "
+        "(komputery, monitory, peryferia) i licencji oprogramowania."
     ),
     Department.OTHER: (
         "Wszystko, co nie należy do żadnego z powyższych działów: sprawy księgowe "
         "i faktury, oferty handlowe, zapytania od klientów, sprawy biurowe "
-        "i administracyjne, wiadomości bez czytelnego zgłoszenia."
+        "i administracyjne (usterki sprzętu AGD, wyposażenia biura), "
+        "wiadomości bez czytelnego zgłoszenia."
     ),
 }
