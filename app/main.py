@@ -1,11 +1,13 @@
 import logging
 import socket
 import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated
 from urllib.parse import urlparse
 
 import httpx
+import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic_ai.exceptions import ModelAPIError
@@ -19,21 +21,42 @@ from app.guards import acquire_semaphore
 from app.models import RouteRequest, RouteResponse
 from app.services import RoutingService
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger()
+
+
+def _configure_logging() -> None:
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.dev.ConsoleRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(
+            getattr(logging, settings.log_level, logging.INFO)
+        ),
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+
+async def _bind_request_id() -> None:
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id=str(uuid.uuid4())[:8])
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.basicConfig(level=settings.log_level)
+    _configure_logging()
     if settings.warmup_on_startup:
         try:
             deps = RoutingDeps(
                 sender_email="warmup@example.com", email_sender=InMemoryEmailSender()
             )
             await agent.run("ping", deps=deps)
-            logger.info("Warmup completed successfully.")
+            log.info("warmup_ok")
         except Exception as e:  # noqa: BLE001
-            logger.warning("Warmup failed: %s", e)
+            log.warning("warmup_failed", error=str(e))
     yield
 
 
@@ -113,16 +136,32 @@ async def readiness_check() -> JSONResponse:
     )
 
 
-@app.post("/api/v1/route", dependencies=[Depends(acquire_semaphore)])
+@app.post(
+    "/api/v1/route",
+    dependencies=[Depends(acquire_semaphore), Depends(_bind_request_id)],
+)
 async def route_message(
     request: RouteRequest,
     routing_service: Annotated[RoutingService, Depends(get_routing_service)],
 ) -> RouteResponse:
     start_time = time.time()
+    log.info(
+        "route_request_received",
+        sender_domain=request.email.split("@")[-1],
+        message_chars=len(request.message),
+    )
+
     result = await routing_service.route(
         sender_email=request.email, message=request.message
     )
     processing_time_ms = int((time.time() - start_time) * 1000)
+
+    log.info(
+        "route_request_completed",
+        department=str(result.department),
+        routed_by=result.routed_by,
+        processing_time_ms=processing_time_ms,
+    )
 
     return RouteResponse(
         department=result.department.address,
