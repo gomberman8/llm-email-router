@@ -1,11 +1,12 @@
 import email
 import email.policy
+import os
 
 import httpx
 import pytest
 
-ROUTER_URL = "http://localhost:8000/api/v1/route"
-MAILPIT_BASE = "http://localhost:8025"
+ROUTER_URL = os.getenv("ROUTER_URL", "http://localhost:8000/api/v1/route")
+MAILPIT_BASE = os.getenv("MAILPIT_BASE", "http://localhost:8025")
 SENDER_EMAIL = "testuser@example.com"
 MESSAGE = "Nie działa mi klawiatura od rana, proszę o pomoc."
 

@@ -73,5 +73,20 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  tests:
+    build:
+      context: .
+      target: dev
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - WARMUP_ON_STARTUP=false
+      - ROUTER_URL=http://api:8000/api/v1/route
+      - MAILPIT_BASE=http://mailpit:8025
+    command: pytest -q
+    profiles:
+      - test
+
 volumes:
   ollama-models:
