@@ -50,7 +50,7 @@ services:
       - OLLAMA_HOST=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:4b-instruct}
     volumes:
-      - ./docker/ollama-init.sh:/usr/local/bin/ollama-init.sh:ro
+      - ./docker/ollama-init.sh:/usr/local/bin/ollama-init.sh:ro,z
     entrypoint: ["/bin/sh", "/usr/local/bin/ollama-init.sh"]
     depends_on:
       ollama:
@@ -78,7 +78,7 @@ services:
       context: .
       target: dev
     volumes:
-      - .:/app
+      - .:/app:z
     environment:
       - PYTHONUNBUFFERED=1
       - WARMUP_ON_STARTUP=false

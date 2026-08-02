@@ -5,7 +5,7 @@ services:
       - /dev/kfd
       - /dev/dri
     group_add:
-      - video
-      - render
+      - "${VIDEO_GID:-39}"
+      - "${RENDER_GID:-105}"
     security_opt:
       - seccomp:unconfined
