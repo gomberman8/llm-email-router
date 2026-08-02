@@ -4,8 +4,5 @@ services:
     devices:
       - /dev/kfd
       - /dev/dri
-    group_add:
-      - "${VIDEO_GID:-39}"
-      - "${RENDER_GID:-105}"
     security_opt:
       - seccomp:unconfined
