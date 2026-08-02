@@ -70,3 +70,27 @@ three consecutive runs before the held-out cases were added.
 - `llama3.2:3b` does call the tool correctly but is clearly less accurate and
   slower. Four fallbacks across the full set of 35 messages indicate unstable
   tool-calling reliability with this model and prompt.
+
+## Model ceiling
+
+The point of this project is to keep inference local, entirely inside an Ollama
+container with no external API calls, so the models worth testing were bounded
+from the start by what the available hardware serves at an acceptable latency.
+`qwen3:4b-instruct` is the largest model that stayed within a few seconds per
+request on CPU while calling the tool reliably, and `qwen3:4b` was rejected on
+latency rather than on quality, its accuracy was never measured.
+
+A larger local model on stronger hardware, or a hosted model behind the same
+OpenAI-compatible interface, would very likely do better on exactly what this
+dataset under-represents: the genuinely ambiguous messages where the
+kadry/human-resources and help-desk/it boundaries overlap. It would also reduce
+the load on the retry path, which exists mainly because a 4B model does not
+reliably emit a tool call on every turn.
+
+Swapping the model is a configuration change, not a rewrite. The name comes from
+`OLLAMA_MODEL`, and the provider is constructed in one place, `build_agent()` in
+[`app/agent/agent.py`](../../app/agent/agent.py), so pointing the agent at a
+different OpenAI-compatible endpoint touches a single function while the tool,
+the enum constraint and the Reply-To handling stay as they are. The accuracy
+reported above is best read as a floor set by the hardware on hand, not as a
+ceiling of the design.

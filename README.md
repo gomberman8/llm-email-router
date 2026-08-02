@@ -49,7 +49,18 @@ Swagger UI: http://localhost:8000/api/v1/docs
 
 ## Architecture
 
-<!-- diagram placeholder -->
+<a href="docs/architecture/architecture.drawio.svg"><img src="docs/architecture/architecture.drawio.svg" alt="System architecture"></a>
+
+A request to `POST /api/v1/route` passes the guards (address validation, message
+length, a concurrency slot) and reaches `RoutingService`, which runs the agent with
+a `RoutingDeps` carrying the sender address and the `EmailSender` implementation.
+The agent talks to Ollama over the OpenAI-compatible endpoint and answers by
+calling `send_to_department`, and it is that tool, not the application, that sends
+the mail. The destination is constrained to a five-value enum and the `Reply-To`
+header is taken from `RoutingDeps`, so neither can be influenced by model output.
+If no tool call arrives, one retry runs with a stricter prompt, and only then does
+the application fall back to `other@`, and the response comes back with
+`routed_by: "fallback"` instead of `"agent"`.
 
 ### Module Map
 
@@ -151,7 +162,15 @@ bottleneck is CPU/GPU, not HTTP.
 | `llama3.2:3b` | 18/29 (62%) | 3/6 (50%) | 22.8 | 4 | rejected |
 | `qwen3:4b` | did not finish | n/a | >120 s (timeout) | n/a | rejected |
 
-Caveats on these numbers: [docs/architecture/routing.md](docs/architecture/routing.md)
+This is a proof of concept for keeping inference local, so the models worth
+testing were bounded by what this hardware serves at an acceptable latency. A
+larger local model, or a hosted one behind the same OpenAI-compatible interface,
+would very likely score higher on the ambiguous boundary cases and lean on the
+retry path less often. That is a configuration change rather than a rewrite:
+`OLLAMA_MODEL` and `build_agent()` are the only places involved.
+
+Caveats on these numbers, and the reasoning behind the model ceiling:
+[docs/architecture/routing.md](docs/architecture/routing.md#model-ceiling)
 
 ## Documentation
 
