@@ -12,8 +12,7 @@ def has_tool_return(messages) -> bool:
 
 def make_tool_caller(
     department: str = "help-desk",
-    subject: str = "Issue",
-    body: str = "Test body",
+    subject: str = "Awaria sprzętu",
 ):
     def fn(messages, info: AgentInfo) -> ModelResponse:
         if has_tool_return(messages):
@@ -23,7 +22,7 @@ def make_tool_caller(
             parts=[
                 ToolCallPart(
                     t.name,
-                    {"department": department, "subject": subject, "body": body},
+                    {"department": department, "subject": subject},
                 )
             ]
         )

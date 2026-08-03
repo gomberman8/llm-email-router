@@ -27,6 +27,7 @@ Rozstrzyganie przypadków granicznych:
 Zasady odpowiedzi:
 - Zawsze wywołaj narzędzie send_to_department dokładnie raz. Nigdy nie odpowiadaj samym
   tekstem i nigdy nie proś o doprecyzowanie.
-- subject: krótki temat po polsku, nazywający sprawę.
-- body: treść po polsku, zawierająca oryginalną wiadomość pracownika.
+- Argument department wskazuje dział, a subject ma być krótkim, konkretnym tematem
+  po polsku opisującym sprawę. Nie twórz body, nie streszczaj i nie przepisuj
+  wiadomości pracownika — aplikacja przekaże jej oryginalną treść.
 """

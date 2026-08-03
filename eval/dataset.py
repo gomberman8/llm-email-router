@@ -11,7 +11,6 @@ class Case:
 
 
 CASES: list[Case] = [
-    # --- kadry ---
     Case(
         message="Chciałbym złożyć wniosek o urlop wypoczynkowy od 14 do 25 sierpnia. Jak to zrobić przez system?",
         expected=Department.KADRY,
@@ -36,7 +35,6 @@ CASES: list[Case] = [
         message="Muszę podpisać aneks do umowy o pracę — podobno były zmiany w warunkach wynagrodzenia. Do kogo się zgłosić i gdzie to zrobić?",
         expected=Department.KADRY,
     ),
-    # --- human-resources ---
     Case(
         message="Jestem nową osobą w firmie (zaczęłam w tym tygodniu) i nie wiem do kogo się zgłosić. Nikt mnie nie przywitał ani nie powiedział gdzie mam siedzieć. Trochę zagubiona.",
         expected=Department.HUMAN_RESOURCES,
@@ -53,7 +51,6 @@ CASES: list[Case] = [
         message="Pracuję tu już 4 lata i zastanawiam się nad awansem. Czy są jakieś ścieżki kariery lub programy rozwojowe? Do kogo powinienem się zgłosić?",
         expected=Department.HUMAN_RESOURCES,
     ),
-    # --- help-desk ---
     Case(
         message="Drukarka przy moim stanowisku (HP LaserJet, sala 204) od rana wyświetla błąd 'paper jam', ale papieru nie ma. Wyłączałem i włączałem, nie pomogło.",
         expected=Department.HELP_DESK,
@@ -74,7 +71,6 @@ CASES: list[Case] = [
         message="Outlook wyrzuca mi błąd 'authentication failed' i nie mogę się zalogować. Inne osoby w biurze logują się normalnie więc to chyba mój komputer.",
         expected=Department.HELP_DESK,
     ),
-    # --- it ---
     Case(
         message="Od ok. 10:00 cały nasz dział (ok. 20 osób) nie ma dostępu do internetu. Dotyczy całego skrzydła B, 2. piętro. Proszę o pilną interwencję.",
         expected=Department.IT,
@@ -104,7 +100,6 @@ CASES: list[Case] = [
         message="VPN przestało mi działać po tym jak dostałem nowego służbowego laptopa. Klient zainstalowany ale przy próbie połączenia wyrzuca 'authentication error'. Pracuję zdalnie więc bez VPN nie mam dostępu do niczego.",
         expected=Department.IT,
     ),
-    # --- other ---
     Case(
         message="Otrzymałam fakturę od zewnętrznego dostawcy usług porządkowych za maj. Do kogo ją przekazać w celu weryfikacji i wystawienia przelewu?",
         expected=Department.OTHER,
@@ -121,7 +116,6 @@ CASES: list[Case] = [
         message="Ekspres do kawy w kuchni na 3. piętrze jest zepsuty od dwóch tygodni. Czy można go naprawić lub wymienić?",
         expected=Department.OTHER,
     ),
-    # --- przypadki graniczne bez podpowiedzi ---
     Case(
         message="Chciałbym zmienić wymiar etatu na pół etatu ze względów osobistych. Jak to wygląda proceduralnie i kto mi w tym pomoże?",
         expected=Department.KADRY,
@@ -138,7 +132,6 @@ CASES: list[Case] = [
         message="Nie mam dostępu do firmowego dysku sieciowego. Próbuję jak zwykle, ale dostęp jest odmówiony.",
         expected=Department.IT,
     ),
-    # --- holdout: nie były widoczne podczas strojenia promptu ---
     Case(
         message="Przysługuje mi urlop okolicznościowy z tytułu ślubu. Ile dni i co muszę dostarczyć?",
         expected=Department.KADRY,

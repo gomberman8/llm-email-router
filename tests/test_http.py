@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,7 +18,6 @@ class _SuccessService:
         return RoutingResult(
             department=Department.HELP_DESK,
             message_id="<test-msg-id>",
-            reasoning="routed",
             routed_by="agent",
         )
 
@@ -52,6 +52,48 @@ def test_message_exceeding_max_length_returns_422(client: TestClient):
     assert resp.status_code == 422
 
 
+def test_oversized_body_returns_413_without_reading_it(client: TestClient):
+    oversized = b"x" * (settings.max_body_bytes + 1)
+    resp = client.post(
+        "/api/v1/route",
+        content=oversized,
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status_code == 413
+    assert str(settings.max_body_bytes) in resp.json()["detail"]
+
+
+def test_body_within_limit_still_reaches_validation(client: TestClient):
+    resp = client.post("/api/v1/route", json={"email": "nope", "message": "x"})
+    assert resp.status_code == 422
+
+
+class _HangingService:
+    async def route(self, sender_email: str, message: str) -> RoutingResult:
+        await asyncio.sleep(3600)
+        raise AssertionError("unreachable")
+
+
+def test_routing_that_outlives_request_timeout_returns_504(client: TestClient):
+    app.dependency_overrides[get_routing_service] = lambda: _HangingService()
+    with patch.object(settings, "request_timeout", 0.05):
+        resp = client.post(
+            "/api/v1/route", json={"email": "a@b.com", "message": "hello"}
+        )
+    assert resp.status_code == 504
+    assert "retry-after" in resp.headers
+
+
+def test_semaphore_slot_is_released_after_a_timeout(client: TestClient):
+    app.dependency_overrides[get_routing_service] = lambda: _HangingService()
+    with patch.object(settings, "request_timeout", 0.05):
+        client.post("/api/v1/route", json={"email": "a@b.com", "message": "hello"})
+
+    app.dependency_overrides[get_routing_service] = lambda: _SuccessService()
+    resp = client.post("/api/v1/route", json={"email": "a@b.com", "message": "hello"})
+    assert resp.status_code == 200
+
+
 def test_saturated_semaphore_returns_503_with_retry_after(
     client: TestClient, saturated_semaphore
 ):
@@ -81,7 +123,6 @@ def test_health_returns_200(client: TestClient):
 
 
 def _smtp_reachable():
-    """asyncio.open_connection stub whose writer closes cleanly."""
     writer = MagicMock()
     writer.wait_closed = AsyncMock()
     return patch(
@@ -121,6 +162,7 @@ def test_route_success_returns_200_with_full_response(client: TestClient):
     assert resp.status_code == 200
     data = resp.json()
     assert "@" in data["department"]
+    assert "reasoning" not in data
     assert "routed_by" in data
     assert "message_id" in data
     assert data["processing_time_ms"] >= 0

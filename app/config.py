@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     department_domain: str = "example.com"
 
     max_message_chars: PositiveInt = 4000
+    max_body_bytes: PositiveInt = 65536
     max_concurrent_runs: PositiveInt = 2
+    request_timeout: PositiveInt = 120
     retry_after_seconds: PositiveInt = 10
 
     agent_retries: NonNegativeInt = 1

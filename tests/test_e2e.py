@@ -34,3 +34,7 @@ def test_e2e_email_reaches_mailpit_with_correct_headers():
     parsed = email.message_from_bytes(raw_resp.content, policy=email.policy.default)
     assert parsed["to"] == department_address
     assert parsed["reply-to"] == SENDER_EMAIL
+    assert parsed["subject"]
+    assert len(parsed["subject"]) <= 120
+    decoded_body = parsed.get_content().replace("\r\n", "\n")
+    assert decoded_body == f"{MESSAGE}\n"

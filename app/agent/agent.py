@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, Literal
 
+from pydantic import StringConstraints
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
@@ -15,6 +16,17 @@ RETRY_NUDGE = (
     "You must call the send_to_department tool exactly once. "
     "Do not reply with plain text."
 )
+FALLBACK_EMAIL_SUBJECT = "Nieprzetworzona wiadomość"
+MAX_SUBJECT_CHARS = 120
+EmailSubject = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=MAX_SUBJECT_CHARS,
+        pattern=r"^[^\r\n]+$",
+    ),
+]
 
 
 @dataclass
@@ -26,6 +38,7 @@ class RoutedEmail:
 @dataclass
 class RoutingDeps:
     sender_email: str
+    original_message: str
     email_sender: EmailSender
     routed: RoutedEmail | None = field(default=None, init=False)
 
@@ -34,7 +47,6 @@ class RoutingDeps:
 class RoutingResult:
     department: Department
     message_id: str
-    reasoning: str
     routed_by: Literal["agent", "fallback"]
 
 
@@ -50,18 +62,21 @@ def build_agent(
         model, deps_type=RoutingDeps, system_prompt=system_prompt
     )
 
-    @agent.tool
+    @agent.tool(sequential=True)
     def send_to_department(
-        ctx: RunContext[RoutingDeps], department: Department, subject: str, body: str
+        ctx: RunContext[RoutingDeps], department: Department, subject: EmailSubject
     ) -> str:
+        if ctx.deps.routed is not None:
+            return "already sent"
+
         message_id = ctx.deps.email_sender.send(
             to=department.address,
             subject=subject,
-            body=body,
+            body=ctx.deps.original_message,
             reply_to=ctx.deps.sender_email,
         )
         ctx.deps.routed = RoutedEmail(department=department, message_id=message_id)
-        return f"sent to {department.address}"
+        return "sent"
 
     return agent
 
@@ -78,26 +93,33 @@ async def route_message(
 ) -> RoutingResult:
     _agent = routing_agent or agent
     for attempt in range(1 + settings.agent_retries):
-        deps = RoutingDeps(sender_email=sender_email, email_sender=email_sender)
+        deps = RoutingDeps(
+            sender_email=sender_email,
+            original_message=message,
+            email_sender=email_sender,
+        )
         prompt = message if attempt == 0 else f"{message}\n\n{RETRY_NUDGE}"
-        result = await _agent.run(prompt, deps=deps)
+
+        async with _agent.iter(prompt, deps=deps) as agent_run:
+            async for _node in agent_run:
+                if deps.routed is not None:
+                    break
+
         if deps.routed is not None:
             return RoutingResult(
                 department=deps.routed.department,
                 message_id=deps.routed.message_id,
-                reasoning=result.output,
                 routed_by="agent",
             )
 
     message_id = email_sender.send(
         to=Department.OTHER.address,
-        subject="Nieprzetworzona wiadomość",
+        subject=FALLBACK_EMAIL_SUBJECT,
         body=message,
         reply_to=sender_email,
     )
     return RoutingResult(
         department=Department.OTHER,
         message_id=message_id,
-        reasoning="agent did not call the routing tool after retrying",
         routed_by="fallback",
     )

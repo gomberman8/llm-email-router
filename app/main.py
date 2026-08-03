@@ -8,16 +8,17 @@ from urllib.parse import urlparse
 
 import httpx
 import structlog
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic_ai.exceptions import ModelAPIError
 
 from app.adapters.memory_sender import InMemoryEmailSender
-from app.agent.agent import RoutingDeps, agent
+from app.agent.agent import route_message as run_routing_agent
 from app.config import settings
 from app.dependencies import get_routing_service
 from app.exceptions import EmailDeliveryError
 from app.guards import acquire_semaphore
+from app.middleware import MaxBodySizeMiddleware
 from app.models import RouteRequest, RouteResponse
 from app.services import RoutingService
 
@@ -50,12 +51,13 @@ async def lifespan(app: FastAPI):
     _configure_logging()
     if settings.warmup_on_startup:
         try:
-            deps = RoutingDeps(
-                sender_email="warmup@example.com", email_sender=InMemoryEmailSender()
+            await run_routing_agent(
+                message="ping",
+                sender_email="warmup@example.com",
+                email_sender=InMemoryEmailSender(),
             )
-            await agent.run("ping", deps=deps)
             log.info("warmup_ok")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.warning("warmup_failed", error_type=type(e).__name__, error=str(e))
     yield
 
@@ -69,6 +71,8 @@ app = FastAPI(
     redoc_url=None,
     lifespan=lifespan,
 )
+
+app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_body_bytes)
 
 
 @app.exception_handler(ModelAPIError)
@@ -91,7 +95,6 @@ async def email_delivery_error_handler(request: Request, exc: EmailDeliveryError
 
 @app.get("/health", tags=["ops"])
 def health_check() -> JSONResponse:
-    """Liveness. Says nothing about dependencies - see /ready for those."""
     return JSONResponse(status_code=200, content={"fastapi": True})
 
 
@@ -153,9 +156,19 @@ async def route_message(
         message_chars=len(payload.message),
     )
 
-    result = await routing_service.route(
-        sender_email=payload.email, message=payload.message
-    )
+    try:
+        result = await asyncio.wait_for(
+            routing_service.route(sender_email=payload.email, message=payload.message),
+            timeout=settings.request_timeout,
+        )
+    except TimeoutError:
+        log.warning("route_request_timeout", timeout_seconds=settings.request_timeout)
+        raise HTTPException(
+            status_code=504,
+            detail="Routing timed out",
+            headers={"Retry-After": str(settings.retry_after_seconds)},
+        ) from None
+
     processing_time_ms = int((time.time() - start_time) * 1000)
 
     log.info(
@@ -167,7 +180,6 @@ async def route_message(
 
     return RouteResponse(
         department=result.department.address,
-        reasoning=result.reasoning,
         message_id=result.message_id,
         routed_by=result.routed_by,
         processing_time_ms=processing_time_ms,
