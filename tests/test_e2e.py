@@ -5,7 +5,9 @@ import os
 import httpx
 import pytest
 
-ROUTER_URL = os.getenv("ROUTER_URL", "http://localhost:8000/api/v1/route")
+API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+ROUTER_URL = f"{API_BASE}/api/v1/route"
+DOCS_URL = f"{API_BASE}/api/v1/docs"
 MAILPIT_BASE = os.getenv("MAILPIT_BASE", "http://localhost:8025")
 SENDER_EMAIL = "testuser@example.com"
 MESSAGE = "Nie działa mi klawiatura od rana, proszę o pomoc."
@@ -39,3 +41,15 @@ def test_e2e_email_reaches_mailpit_with_correct_headers():
     assert len(parsed["subject"]) <= 120
     decoded_body = parsed.get_content().replace("\r\n", "\n")
     assert decoded_body == f"{MESSAGE}\n"
+
+
+@pytest.mark.llm
+def test_swagger_ui_loads_its_assets_from_the_container():
+    html = httpx.get(DOCS_URL).text
+    assert "https://" not in html
+    assert "/api/v1/swagger-ui/swagger-ui-bundle.js" in html
+
+    for asset in ("swagger-ui-bundle.js", "swagger-ui.css", "favicon-32x32.png"):
+        resp = httpx.get(f"{API_BASE}/api/v1/swagger-ui/{asset}")
+        assert resp.status_code == 200
+        assert resp.content

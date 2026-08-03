@@ -11,7 +11,14 @@ from app.agent.departments import Department
 from app.config import settings
 from app.dependencies import get_routing_service
 from app.exceptions import EmailDeliveryError
-from app.main import _elapsed_ms, app
+from app.main import (
+    SWAGGER_ASSET_ROUTE,
+    SWAGGER_CDN,
+    _elapsed_ms,
+    app,
+    qualified_model_name,
+    swagger_asset_base,
+)
 
 
 class _SuccessService:
@@ -237,6 +244,50 @@ def test_ready_returns_200_when_all_dependencies_ok(client: TestClient):
     assert deps["smtp"] == "ok"
     assert deps["ollama"] == "ok"
     assert deps["ollama_model"] == "ok"
+
+
+def test_untagged_model_name_matches_the_latest_tag_ollama_reports():
+    assert qualified_model_name("qwen3") == "qwen3:latest"
+    assert qualified_model_name("qwen3:4b-instruct") == "qwen3:4b-instruct"
+
+
+def test_ready_accepts_an_untagged_model_name(client: TestClient):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"models": [{"name": "qwen3:latest"}]}
+
+    mock_inner = MagicMock()
+    mock_inner.get = AsyncMock(return_value=mock_resp)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__aenter__ = AsyncMock(return_value=mock_inner)
+    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch.object(settings, "ollama_model", "qwen3"),
+        _smtp_reachable(),
+        patch("httpx.AsyncClient", return_value=mock_ctx),
+    ):
+        resp = client.get("/ready")
+
+    assert resp.status_code == 200
+    assert resp.json()["dependencies"]["ollama_model"] == "ok"
+
+
+def test_swagger_assets_are_served_locally_when_bundled(tmp_path):
+    assert swagger_asset_base(str(tmp_path)) == SWAGGER_ASSET_ROUTE
+
+
+def test_swagger_assets_fall_back_to_cdn_without_a_bundle(tmp_path):
+    assert swagger_asset_base("") == SWAGGER_CDN
+    assert swagger_asset_base(str(tmp_path / "missing")) == SWAGGER_CDN
+
+
+def test_swagger_ui_html_references_the_configured_asset_base(client: TestClient):
+    from app.main import _swagger_base
+
+    html = client.get("/api/v1/docs").text
+    assert f"{_swagger_base}/swagger-ui-bundle.js" in html
+    assert f"{_swagger_base}/swagger-ui.css" in html
 
 
 def test_ready_returns_503_when_configured_model_not_in_ollama(client: TestClient):

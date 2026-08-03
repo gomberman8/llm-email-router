@@ -3,13 +3,16 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
 import httpx
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic_ai.exceptions import ModelAPIError
 
 from app.adapters.memory_sender import InMemoryEmailSender
@@ -62,17 +65,54 @@ async def lifespan(app: FastAPI):
     yield
 
 
+DOCS_URL = "/api/v1/docs"
+OPENAPI_URL = "/api/v1/openapi.json"
+SWAGGER_ASSET_ROUTE = "/api/v1/swagger-ui"
+SWAGGER_CDN = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5"
+FASTAPI_FAVICON = "https://fastapi.tiangolo.com/img/favicon.png"
+
+
+def swagger_asset_base(directory: str) -> str:
+    if directory and Path(directory).is_dir():
+        return SWAGGER_ASSET_ROUTE
+    return SWAGGER_CDN
+
+
 app = FastAPI(
     title="LLM Email Router",
     description="Routes free-form messages to the right department via an LLM agent.",
     version="1.0.0",
-    docs_url="/api/v1/docs",
-    openapi_url="/api/v1/openapi.json",
+    docs_url=None,
+    openapi_url=OPENAPI_URL,
     redoc_url=None,
     lifespan=lifespan,
 )
 
 app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_body_bytes)
+
+_swagger_base = swagger_asset_base(settings.swagger_ui_dir)
+if _swagger_base == SWAGGER_ASSET_ROUTE:
+    app.mount(
+        SWAGGER_ASSET_ROUTE,
+        StaticFiles(directory=settings.swagger_ui_dir),
+        name="swagger-ui",
+    )
+
+
+@app.get(DOCS_URL, include_in_schema=False)
+def swagger_ui() -> HTMLResponse:
+    favicon = (
+        f"{_swagger_base}/favicon-32x32.png"
+        if _swagger_base == SWAGGER_ASSET_ROUTE
+        else FASTAPI_FAVICON
+    )
+    return get_swagger_ui_html(
+        openapi_url=OPENAPI_URL,
+        title=app.title,
+        swagger_js_url=f"{_swagger_base}/swagger-ui-bundle.js",
+        swagger_css_url=f"{_swagger_base}/swagger-ui.css",
+        swagger_favicon_url=favicon,
+    )
 
 
 @app.exception_handler(ModelAPIError)
@@ -96,6 +136,10 @@ async def email_delivery_error_handler(request: Request, exc: EmailDeliveryError
 @app.get("/health", tags=["ops"])
 def health_check() -> JSONResponse:
     return JSONResponse(status_code=200, content={"fastapi": True})
+
+
+def qualified_model_name(model: str) -> str:
+    return model if ":" in model else f"{model}:latest"
 
 
 @app.get("/ready", tags=["ops"])
@@ -122,7 +166,7 @@ async def readiness_check() -> JSONResponse:
             resp.raise_for_status()
             models_data = resp.json().get("models", [])
             models = [m["name"] for m in models_data]
-            if settings.ollama_model not in models:
+            if qualified_model_name(settings.ollama_model) not in models:
                 deps["ollama_model"] = (
                     f"Model {settings.ollama_model} not found. Available: {models}"
                 )

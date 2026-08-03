@@ -98,7 +98,7 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTEST_ADDOPTS=-p no:cacheprovider
       - WARMUP_ON_STARTUP=false
-      - ROUTER_URL=http://api:8000/api/v1/route
+      - API_BASE=http://api:8000
       - MAILPIT_BASE=http://mailpit:8025
     command: pytest -q
     profiles:
