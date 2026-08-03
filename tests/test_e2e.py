@@ -9,6 +9,7 @@ ROUTER_URL = os.getenv("ROUTER_URL", "http://localhost:8000/api/v1/route")
 MAILPIT_BASE = os.getenv("MAILPIT_BASE", "http://localhost:8025")
 SENDER_EMAIL = "testuser@example.com"
 MESSAGE = "Nie działa mi klawiatura od rana, proszę o pomoc."
+EXPECTED_DEPARTMENT = "help-desk@example.com"
 
 
 @pytest.mark.llm
@@ -22,7 +23,7 @@ def test_e2e_email_reaches_mailpit_with_correct_headers():
     )
     assert resp.status_code == 200
     body = resp.json()
-    department_address = body["department"]
+    assert body["department"] == EXPECTED_DEPARTMENT
 
     messages = httpx.get(f"{MAILPIT_BASE}/api/v1/messages").json()
     assert messages["total"] >= 1
@@ -32,7 +33,7 @@ def test_e2e_email_reaches_mailpit_with_correct_headers():
     assert raw_resp.status_code == 200
 
     parsed = email.message_from_bytes(raw_resp.content, policy=email.policy.default)
-    assert parsed["to"] == department_address
+    assert parsed["to"] == EXPECTED_DEPARTMENT
     assert parsed["reply-to"] == SENDER_EMAIL
     assert parsed["subject"]
     assert len(parsed["subject"]) <= 120
