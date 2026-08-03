@@ -1,8 +1,11 @@
+import asyncio
 from dataclasses import dataclass, field
 from typing import Annotated, Literal
 
+import structlog
 from pydantic import StringConstraints
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.settings import ModelSettings
@@ -11,6 +14,8 @@ from app.agent.departments import Department
 from app.agent.prompt import SYSTEM_PROMPT
 from app.config import settings
 from app.ports import EmailSender
+
+log = structlog.get_logger()
 
 RETRY_NUDGE = (
     "You must call the send_to_department tool exactly once. "
@@ -100,10 +105,13 @@ async def route_message(
         )
         prompt = message if attempt == 0 else f"{message}\n\n{RETRY_NUDGE}"
 
-        async with _agent.iter(prompt, deps=deps) as agent_run:
-            async for _node in agent_run:
-                if deps.routed is not None:
-                    break
+        try:
+            async with _agent.iter(prompt, deps=deps) as agent_run:
+                async for _node in agent_run:
+                    if deps.routed is not None:
+                        break
+        except UnexpectedModelBehavior as e:
+            log.warning("agent_run_rejected", attempt=attempt, error=str(e))
 
         if deps.routed is not None:
             return RoutingResult(
@@ -112,7 +120,8 @@ async def route_message(
                 routed_by="agent",
             )
 
-    message_id = email_sender.send(
+    message_id = await asyncio.to_thread(
+        email_sender.send,
         to=Department.OTHER.address,
         subject=FALLBACK_EMAIL_SUBJECT,
         body=message,

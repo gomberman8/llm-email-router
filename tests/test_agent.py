@@ -161,6 +161,47 @@ async def test_successful_tool_call_does_not_trigger_followup_generation():
     assert model_calls == 1
 
 
+async def test_unroutable_tool_arguments_fall_back_instead_of_raising():
+    def fn(messages, info: AgentInfo) -> ModelResponse:
+        t = info.function_tools[0]
+        return ModelResponse(
+            parts=[ToolCallPart(t.name, {"department": "it", "subject": "x" * 500})]
+        )
+
+    test_agent = build_agent(SYSTEM_PROMPT)
+    sender = InMemoryEmailSender()
+    with test_agent.override(model=FunctionModel(fn)):
+        result = await route_message(
+            "moja wiadomość", "a@b.com", sender, routing_agent=test_agent
+        )
+
+    assert result.routed_by == "fallback"
+    assert result.department == Department.OTHER
+    assert len(sender.sent) == 1
+    assert sender.sent[0].body == "moja wiadomość"
+    assert sender.sent[0].reply_to == "a@b.com"
+
+
+async def test_department_outside_the_enum_falls_back_instead_of_raising():
+    def fn(messages, info: AgentInfo) -> ModelResponse:
+        t = info.function_tools[0]
+        return ModelResponse(
+            parts=[
+                ToolCallPart(t.name, {"department": "finanse", "subject": "Faktura"})
+            ]
+        )
+
+    test_agent = build_agent(SYSTEM_PROMPT)
+    sender = InMemoryEmailSender()
+    with test_agent.override(model=FunctionModel(fn)):
+        result = await route_message(
+            "faktura", "a@b.com", sender, routing_agent=test_agent
+        )
+
+    assert result.routed_by == "fallback"
+    assert result.department == Department.OTHER
+
+
 async def test_duplicate_tool_calls_send_only_one_email():
     def fn(messages, info: AgentInfo) -> ModelResponse:
         t = info.function_tools[0]
