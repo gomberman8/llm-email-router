@@ -80,10 +80,21 @@ def test_health_returns_200(client: TestClient):
     assert resp.status_code == 200
 
 
+def _smtp_reachable():
+    """asyncio.open_connection stub whose writer closes cleanly."""
+    writer = MagicMock()
+    writer.wait_closed = AsyncMock()
+    return patch(
+        "asyncio.open_connection", new=AsyncMock(return_value=(MagicMock(), writer))
+    )
+
+
 def test_ready_returns_503_when_dependency_unreachable(client: TestClient):
-    with patch("socket.create_connection", side_effect=OSError("refused")):
+    refused = AsyncMock(side_effect=OSError("refused"))
+    with patch("asyncio.open_connection", new=refused):
         resp = client.get("/ready")
     assert resp.status_code == 503
+    assert resp.json()["dependencies"]["smtp"] != "ok"
 
 
 def test_swagger_ui_at_configured_docs_url(client: TestClient):
@@ -126,10 +137,7 @@ def test_ready_returns_200_when_all_dependencies_ok(client: TestClient):
     mock_ctx.__aenter__ = AsyncMock(return_value=mock_inner)
     mock_ctx.__aexit__ = AsyncMock(return_value=False)
 
-    with (
-        patch("socket.create_connection"),
-        patch("httpx.AsyncClient", return_value=mock_ctx),
-    ):
+    with _smtp_reachable(), patch("httpx.AsyncClient", return_value=mock_ctx):
         resp = client.get("/ready")
 
     assert resp.status_code == 200
@@ -150,10 +158,7 @@ def test_ready_returns_503_when_configured_model_not_in_ollama(client: TestClien
     mock_ctx.__aenter__ = AsyncMock(return_value=mock_inner)
     mock_ctx.__aexit__ = AsyncMock(return_value=False)
 
-    with (
-        patch("socket.create_connection"),
-        patch("httpx.AsyncClient", return_value=mock_ctx),
-    ):
+    with _smtp_reachable(), patch("httpx.AsyncClient", return_value=mock_ctx):
         resp = client.get("/ready")
 
     assert resp.status_code == 503

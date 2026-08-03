@@ -1,5 +1,5 @@
+import asyncio
 import logging
-import socket
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
             await agent.run("ping", deps=deps)
             log.info("warmup_ok")
         except Exception as e:  # noqa: BLE001
-            log.warning("warmup_failed", error=str(e))
+            log.warning("warmup_failed", error_type=type(e).__name__, error=str(e))
     yield
 
 
@@ -101,10 +101,12 @@ async def readiness_check() -> JSONResponse:
     status_code = 200
 
     try:
-        with socket.create_connection(
-            (settings.smtp_host, settings.smtp_port), timeout=settings.smtp_timeout
-        ):
-            pass
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(settings.smtp_host, settings.smtp_port),
+            timeout=settings.ready_timeout,
+        )
+        writer.close()
+        await writer.wait_closed()
     except OSError as e:
         deps["smtp"] = str(e)
         status_code = 503
@@ -141,18 +143,18 @@ async def readiness_check() -> JSONResponse:
     dependencies=[Depends(acquire_semaphore), Depends(_bind_request_id)],
 )
 async def route_message(
-    request: RouteRequest,
+    payload: RouteRequest,
     routing_service: Annotated[RoutingService, Depends(get_routing_service)],
 ) -> RouteResponse:
     start_time = time.time()
     log.info(
         "route_request_received",
-        sender_domain=request.email.split("@")[-1],
-        message_chars=len(request.message),
+        sender_domain=payload.email.split("@")[-1],
+        message_chars=len(payload.message),
     )
 
     result = await routing_service.route(
-        sender_email=request.email, message=request.message
+        sender_email=payload.email, message=payload.message
     )
     processing_time_ms = int((time.time() - start_time) * 1000)
 
