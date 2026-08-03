@@ -3,7 +3,8 @@
 Routes internal company messages to the right department via an LLM agent.
 An HTTP endpoint accepts `{email, message}` in Polish; pydantic-ai + Ollama
 calls a tool that sends an email to the correct address. Reply-To is set from
-the HTTP request; the model cannot override it. Five target departments:
+the HTTP request and the original message is forwarded unchanged; the model
+cannot override either. Five target departments:
 `kadry` (payroll/HR admin), `human-resources`, `help-desk`, `it`, `other`.
 
 ## Quick Start
@@ -36,7 +37,6 @@ Sample response:
 ```json
 {
   "department": "help-desk@example.com",
-  "reasoning": "Wiadomość została pomyślnie przekazana do działu help-desk.",
   "message_id": "<...@...>",
   "routed_by": "agent",
   "processing_time_ms": 5240
@@ -52,12 +52,15 @@ Swagger UI: http://localhost:8000/api/v1/docs
 <a href="docs/architecture/architecture.drawio.svg"><img src="docs/architecture/architecture.drawio.svg" alt="System architecture"></a>
 
 A request to `POST /api/v1/route` passes the guards (address validation, message
-length, a concurrency slot) and reaches `RoutingService`, which runs the agent with
-a `RoutingDeps` carrying the sender address and the `EmailSender` implementation.
-The agent talks to Ollama over the OpenAI-compatible endpoint and answers by
-calling `send_to_department`, and it is that tool, not the application, that sends
-the mail. The destination is constrained to a five-value enum and the `Reply-To`
-header is taken from `RoutingDeps`, so neither can be influenced by model output.
+length including rejection of blank/whitespace-only text, a concurrency slot) and
+reaches `RoutingService`, which runs the agent with
+a `RoutingDeps` carrying the sender address, original message and the `EmailSender`
+implementation. The agent talks to Ollama over the OpenAI-compatible endpoint and
+calls `send_to_department(department, subject)`. It is that tool, not a parsed
+model answer, that sends the mail. The model selects the five-value department
+enum and creates a short, validated subject. The body and `Reply-To` are taken
+from `RoutingDeps` and cannot be rewritten by model output. The run stops as soon
+as the tool succeeds, so no follow-up prose is generated.
 If no tool call arrives, one retry runs with a stricter prompt, and only then does
 the application fall back to `other@`, and the response comes back with
 `routed_by: "fallback"` instead of `"agent"`.
@@ -83,7 +86,7 @@ app/
     ├── smtp_sender.py   SmtpEmailSender (production / Mailpit)
     └── memory_sender.py InMemoryEmailSender (tests and eval)
 eval/                    Evaluation harness, 35 labelled Polish messages
-tests/                   19 unit tests + 1 e2e behind the llm marker
+tests/                   37 unit tests + 1 e2e behind the llm marker
 docker/                  One-shot model pull script
 ```
 
@@ -92,7 +95,7 @@ docker/                  One-shot model pull script
 No local Python required; Docker is sufficient:
 
 ```bash
-docker compose run --rm tests                   # unit tests (19, ~0.6 s)
+docker compose run --rm tests                   # unit tests (37, ~0.6 s)
 docker compose run --rm tests pytest -m llm -q  # e2e, requires running stack
 ```
 
@@ -115,9 +118,7 @@ docker compose exec -T api python -m eval.run_eval --limit 8  # first 8 cases
 ## GPU
 
 ```bash
-# AMD ROCm, verified on an RX 9070 XT
 docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d --wait
-# NVIDIA CUDA, compose syntax validated, never run on GPU hardware
 docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d --wait
 ```
 
@@ -138,8 +139,15 @@ been run on real hardware; only its compose syntax is validated.
 ## Design Decisions
 
 **Ports and adapters.** `EmailSender` is a Protocol (`app/ports.py`). Production uses
-`SmtpEmailSender`; tests use `InMemoryEmailSender`. Agent only calls a tool and has
-no knowledge of transport.
+`SmtpEmailSender`; tests use `InMemoryEmailSender`. The agent selects a department
+and creates a subject; the tool forwards the trusted original body through the
+transport.
+
+**Body size enforced ahead of the app.** `MaxBodySizeMiddleware` buffers the raw
+ASGI body itself and rejects anything over `max_body_bytes` with a `413` before
+FastAPI is invoked at all, so an oversized request is never partially processed.
+A header-only `Content-Length` check would miss a chunked request or a declared
+length that understates the real body; buffering the actual bytes closes both.
 
 **Mailpit over MailHog.** Actively maintained, ships `/mailpit readyz`, no curl needed.
 
