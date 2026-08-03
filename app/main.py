@@ -141,6 +141,10 @@ async def readiness_check() -> JSONResponse:
     )
 
 
+def _elapsed_ms(start: float) -> int:
+    return int((time.monotonic() - start) * 1000)
+
+
 @app.post(
     "/api/v1/route",
     dependencies=[Depends(acquire_semaphore), Depends(_bind_request_id)],
@@ -149,7 +153,7 @@ async def route_message(
     payload: RouteRequest,
     routing_service: Annotated[RoutingService, Depends(get_routing_service)],
 ) -> RouteResponse:
-    start_time = time.time()
+    start_time = time.monotonic()
     log.info(
         "route_request_received",
         sender_domain=payload.email.split("@")[-1],
@@ -169,7 +173,7 @@ async def route_message(
             headers={"Retry-After": str(settings.retry_after_seconds)},
         ) from None
 
-    processing_time_ms = int((time.time() - start_time) * 1000)
+    processing_time_ms = _elapsed_ms(start_time)
 
     log.info(
         "route_request_completed",

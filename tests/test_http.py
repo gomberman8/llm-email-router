@@ -1,4 +1,5 @@
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,7 +11,7 @@ from app.agent.departments import Department
 from app.config import settings
 from app.dependencies import get_routing_service
 from app.exceptions import EmailDeliveryError
-from app.main import app
+from app.main import _elapsed_ms, app
 
 
 class _SuccessService:
@@ -209,6 +210,12 @@ def test_route_success_returns_200_with_full_response(client: TestClient):
     assert "routed_by" in data
     assert "message_id" in data
     assert data["processing_time_ms"] >= 0
+
+
+def test_elapsed_ms_computes_milliseconds_from_monotonic_clock():
+    with patch("app.main.time.monotonic", side_effect=[100.0, 100.25]):
+        start = time.monotonic()
+        assert _elapsed_ms(start) == 250
 
 
 def test_ready_returns_200_when_all_dependencies_ok(client: TestClient):
