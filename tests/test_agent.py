@@ -45,13 +45,14 @@ async def test_email_uses_model_subject_and_original_request_data():
     test_agent = build_agent(SYSTEM_PROMPT)
     sender = InMemoryEmailSender()
     with test_agent.override(model=FunctionModel(fn)):
-        await route_message(
+        result = await route_message(
             original_message, sender_email, sender, routing_agent=test_agent
         )
 
     assert sender.sent[0].reply_to == sender_email
     assert sender.sent[0].body == original_message
     assert sender.sent[0].subject == "Awaria komputera"
+    assert result.subject == sender.sent[0].subject
 
 
 async def test_department_parameter_schema_restricted_to_enum_values():

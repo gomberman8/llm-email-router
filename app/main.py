@@ -222,12 +222,14 @@ async def route_message(
     log.info(
         "route_request_completed",
         department=str(result.department),
+        subject=result.subject,
         routed_by=result.routed_by,
         processing_time_ms=processing_time_ms,
     )
 
     return RouteResponse(
         department=result.department.address,
+        subject=result.subject,
         message_id=result.message_id,
         routed_by=result.routed_by,
         processing_time_ms=processing_time_ms,

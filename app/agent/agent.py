@@ -38,6 +38,7 @@ EmailSubject = Annotated[
 class RoutedEmail:
     department: Department
     message_id: str
+    subject: str
 
 
 @dataclass
@@ -52,6 +53,7 @@ class RoutingDeps:
 class RoutingResult:
     department: Department
     message_id: str
+    subject: str
     routed_by: Literal["agent", "fallback"]
 
 
@@ -80,7 +82,9 @@ def build_agent(
             body=ctx.deps.original_message,
             reply_to=ctx.deps.sender_email,
         )
-        ctx.deps.routed = RoutedEmail(department=department, message_id=message_id)
+        ctx.deps.routed = RoutedEmail(
+            department=department, message_id=message_id, subject=subject
+        )
         return "sent"
 
     return agent
@@ -117,6 +121,7 @@ async def route_message(
             return RoutingResult(
                 department=deps.routed.department,
                 message_id=deps.routed.message_id,
+                subject=deps.routed.subject,
                 routed_by="agent",
             )
 
@@ -130,5 +135,6 @@ async def route_message(
     return RoutingResult(
         department=Department.OTHER,
         message_id=message_id,
+        subject=FALLBACK_EMAIL_SUBJECT,
         routed_by="fallback",
     )

@@ -1,6 +1,7 @@
 import email
 import email.policy
 import os
+from email.utils import parseaddr
 
 import httpx
 import pytest
@@ -37,8 +38,13 @@ def test_e2e_email_reaches_mailpit_with_correct_headers():
     parsed = email.message_from_bytes(raw_resp.content, policy=email.policy.default)
     assert parsed["to"] == EXPECTED_DEPARTMENT
     assert parsed["reply-to"] == SENDER_EMAIL
+
+    display, from_address = parseaddr(parsed["from"])
+    assert display.startswith(SENDER_EMAIL)
+    assert from_address != SENDER_EMAIL
     assert parsed["subject"]
     assert len(parsed["subject"]) <= 120
+    assert body["subject"] == parsed["subject"]
     decoded_body = parsed.get_content().replace("\r\n", "\n")
     assert decoded_body == f"{MESSAGE}\n"
 

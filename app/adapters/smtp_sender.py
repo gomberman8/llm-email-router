@@ -1,8 +1,10 @@
 import smtplib
 from email.message import EmailMessage
-from email.utils import make_msgid
+from email.utils import formataddr, make_msgid
 
 from app.exceptions import EmailDeliveryError
+
+VIA_LABEL = "via LLM Router"
 
 
 class SmtpEmailSender:
@@ -14,7 +16,7 @@ class SmtpEmailSender:
 
     def send(self, to: str, subject: str, body: str, reply_to: str) -> str:
         message = EmailMessage()
-        message["From"] = self._mail_from
+        message["From"] = formataddr((f"{reply_to} {VIA_LABEL}", self._mail_from))
         message["To"] = to
         message["Subject"] = subject
         message["Reply-To"] = reply_to

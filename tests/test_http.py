@@ -26,6 +26,7 @@ class _SuccessService:
         return RoutingResult(
             department=Department.HELP_DESK,
             message_id="<test-msg-id>",
+            subject="Awaria komputera",
             routed_by="agent",
         )
 
@@ -39,6 +40,7 @@ class _CapturingService:
         return RoutingResult(
             department=Department.HELP_DESK,
             message_id="<test-msg-id>",
+            subject="Awaria komputera",
             routed_by="agent",
         )
 
@@ -213,6 +215,7 @@ def test_route_success_returns_200_with_full_response(client: TestClient):
     assert resp.status_code == 200
     data = resp.json()
     assert "@" in data["department"]
+    assert data["subject"] == "Awaria komputera"
     assert "reasoning" not in data
     assert "routed_by" in data
     assert "message_id" in data

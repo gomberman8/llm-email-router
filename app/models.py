@@ -28,6 +28,7 @@ class RouteRequest(BaseModel):
 
 class RouteResponse(BaseModel):
     department: str
+    subject: str
     message_id: str
     routed_by: Literal["agent", "fallback"]
     processing_time_ms: int
