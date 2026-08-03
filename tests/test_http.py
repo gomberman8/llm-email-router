@@ -22,6 +22,19 @@ class _SuccessService:
         )
 
 
+class _CapturingService:
+    def __init__(self) -> None:
+        self.captured_message: str | None = None
+
+    async def route(self, sender_email: str, message: str) -> RoutingResult:
+        self.captured_message = message
+        return RoutingResult(
+            department=Department.HELP_DESK,
+            message_id="<test-msg-id>",
+            routed_by="agent",
+        )
+
+
 class _EmailErrorService:
     async def route(self, sender_email: str, message: str) -> RoutingResult:
         raise EmailDeliveryError("smtp down")
@@ -50,6 +63,36 @@ def test_message_exceeding_max_length_returns_422(client: TestClient):
     long_msg = "x" * (settings.max_message_chars + 1)
     resp = client.post("/api/v1/route", json={"email": "a@b.com", "message": long_msg})
     assert resp.status_code == 422
+
+
+def test_empty_message_returns_422(client: TestClient):
+    resp = client.post("/api/v1/route", json={"email": "a@b.com", "message": ""})
+    assert resp.status_code == 422
+
+
+def test_whitespace_only_message_returns_422(client: TestClient):
+    resp = client.post(
+        "/api/v1/route", json={"email": "a@b.com", "message": "   \t\n  "}
+    )
+    assert resp.status_code == 422
+
+
+def test_message_with_surrounding_whitespace_is_preserved_unstripped(
+    client: TestClient,
+):
+    service = _CapturingService()
+    app.dependency_overrides[get_routing_service] = lambda: service
+    original = "  Nie działa drukarka  "
+    resp = client.post("/api/v1/route", json={"email": "a@b.com", "message": original})
+    assert resp.status_code == 200
+    assert service.captured_message == original
+
+
+def test_message_of_exactly_max_length_is_accepted(client: TestClient):
+    app.dependency_overrides[get_routing_service] = lambda: _SuccessService()
+    max_msg = "x" * settings.max_message_chars
+    resp = client.post("/api/v1/route", json={"email": "a@b.com", "message": max_msg})
+    assert resp.status_code == 200
 
 
 def test_oversized_body_returns_413_without_reading_it(client: TestClient):
