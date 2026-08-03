@@ -1,188 +1,116 @@
 # LLM Email Router
 
-Routes internal company messages to the right department via an LLM agent.
-An HTTP endpoint accepts `{email, message}` in Polish; pydantic-ai + Ollama
-calls a tool that sends an email to the correct address. Reply-To is set from
-the HTTP request and the original message is forwarded unchanged; the model
-cannot override either. Five target departments:
-`kadry` (payroll/HR admin), `human-resources`, `help-desk`, `it`, `other`.
+An HTTP endpoint takes `{email, message}`, a local LLM agent decides which internal
+department should handle it, and the agent sends the mail itself through a tool
+call. Targets are `kadry`, `human-resources`, `help-desk`, `it` and `other`.
+Everything runs in containers; no external API is called.
 
-## Quick Start
+## Running it
 
 ```bash
-docker compose up -d --wait
+docker compose up -d
 ```
 
-That is the whole setup. No `.env` file is required: every setting has a default
-in both `docker-compose.yml` and `app/config.py`. Copy `.env.example` only if you
-want to change something; it documents the available knobs.
+The command returns when the API is actually serving, not when the containers have
+merely started. First run downloads ~2.5 GB of model weights.
 
-`--wait` matters: without it `up -d` returns as soon as the containers start, while
-the API still needs a few seconds to warm the model, and the first request would be
-refused. With `--wait` the command returns when the stack is genuinely ready.
-
-First run downloads ~2.5 GB of model weights. Measured cold start on Fedora 43
-x86_64 from a clean clone with no cached images: **57.7 s**.
-
-## Example
+No `.env` is needed. Every setting has a default in `docker-compose.yml` and in
+`app/config.py`; copy `.env.example` only if you want to change one.
 
 ```bash
 curl -s -X POST http://localhost:8000/api/v1/route \
   -H "Content-Type: application/json" \
-  -d '{"email": "pracownik@firma.pl", "message": "Nie działa mi drukarka od rana."}'
+  -d '{"email": "jan.nowak@example.com", "message": "Nie działa mi drukarka od rana."}'
 ```
-
-Sample response:
 
 ```json
 {
   "department": "help-desk@example.com",
+  "subject": "Awaria drukarki",
   "message_id": "<...@...>",
   "routed_by": "agent",
-  "processing_time_ms": 5240
+  "processing_time_ms": 4380
 }
 ```
 
-Swagger UI: http://localhost:8000/api/v1/docs  
-`/health` reports whether the process is alive (no dependency checks).
-`/ready` reports whether Ollama, the model and SMTP are reachable.
+| | |
+|---|---|
+| Swagger UI | http://localhost:8000/api/v1/docs |
+| Mailpit inbox | http://localhost:8025 |
+| `/health` | process is alive, no dependency checks |
+| `/ready` | Ollama, the model and SMTP are reachable |
 
-## Architecture
+## How it works
 
-<a href="docs/architecture/architecture.drawio.svg"><img src="docs/architecture/architecture.drawio.svg" alt="System architecture"></a>
+![System architecture](docs/architecture.drawio.svg)
 
-A request to `POST /api/v1/route` passes the guards (address validation, message
-length including rejection of blank/whitespace-only text, a concurrency slot) and
-reaches `RoutingService`, which runs the agent with
-a `RoutingDeps` carrying the sender address, original message and the `EmailSender`
-implementation. The agent talks to Ollama over the OpenAI-compatible endpoint and
-calls `send_to_department(department, subject)`. It is that tool, not a parsed
-model answer, that sends the mail. The model selects the five-value department
-enum and creates a short, validated subject. The body and `Reply-To` are taken
-from `RoutingDeps` and cannot be rewritten by model output. The run stops as soon
-as the tool succeeds, so no follow-up prose is generated.
-If no tool call arrives, one retry runs with a stricter prompt, and only then does
-the application fall back to `other@`, and the response comes back with
-`routed_by: "fallback"` instead of `"agent"`.
+The agent gets one tool, `send_to_department(department, subject)`. `department` is
+a five-value enum, so it cannot invent an address. The message body and the
+`Reply-To` header come from the HTTP request through `RoutingDeps` and never pass
+through model output, so nothing the sender writes can redirect the reply address or
+rewrite the forwarded text. The run stops the moment the tool succeeds.
 
-### Module Map
+If the model produces no tool call, or one that fails validation, the request is
+retried once with a stricter prompt. If that also fails the application sends to
+`other@` itself and the response says `routed_by: "fallback"`.
 
+`docs/ARCHITECTURE.md` covers the rest: the tool contract, the department scopes,
+the model evaluation, container startup and the known limits.
+
+## Layout
 
 ```
 app/
-├── main.py              FastAPI, endpoints, lifespan, exception handlers, structured logging
-├── config.py            All config via pydantic-settings / env vars
-├── models.py            Request / response models
-├── dependencies.py      Dependency injection wiring
-├── guards.py            Concurrency semaphore (MAX_CONCURRENT_RUNS)
-├── ports.py             EmailSender Protocol, the architectural boundary
-├── services.py          RoutingService, the use case
-├── exceptions.py        EmailDeliveryError
-├── agent/
-│   ├── agent.py         pydantic-ai Agent, tool registration, retry and fallback
-│   ├── departments.py   Department enum + scope descriptions
-│   └── prompt.py        System prompt (Polish)
-└── adapters/
-    ├── smtp_sender.py   SmtpEmailSender (production / Mailpit)
-    └── memory_sender.py InMemoryEmailSender (tests and eval)
-eval/                    Evaluation harness, 35 labelled Polish messages
-tests/                   37 unit tests + 1 e2e behind the llm marker
-docker/                  One-shot model pull script
+├── main.py         FastAPI, endpoints, lifespan, error handlers, logging
+├── config.py       Settings via pydantic-settings
+├── models.py       Request and response models
+├── guards.py       Concurrency semaphore
+├── middleware.py   Body size limit at the ASGI level
+├── ports.py        EmailSender Protocol
+├── services.py     RoutingService
+├── agent/          Agent, tool, department enum, Polish system prompt
+└── adapters/       SMTP and in-memory EmailSender
+eval/               35 labelled Polish messages and a scoring harness
+tests/              44 unit tests, 2 e2e behind the llm marker
 ```
 
-## Running Tests
-
-No local Python required; Docker is sufficient:
+## Tests
 
 ```bash
-docker compose run --rm tests                   # unit tests (37, ~0.6 s)
-docker compose run --rm tests pytest -m llm -q  # e2e, requires running stack
+docker compose run --rm tests                   # unit
+docker compose run --rm tests pytest -m llm -q  # e2e, needs the stack up
 ```
 
-Local (venv needed only for tests and eval):
+Or locally, with a venv:
 
 ```bash
 python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/pytest -q && .venv/bin/pytest -m llm -q
+.venv/bin/pytest -q
 ```
 
 ## Evaluation
 
 ```bash
 docker compose cp eval api:/app/
-docker compose exec -T api python -m eval.run_eval            # default model
-docker compose exec -T api python -m eval.run_eval --model llama3.2:3b
-docker compose exec -T api python -m eval.run_eval --limit 8  # first 8 cases
+docker compose exec -T api python -m eval.run_eval
+docker compose exec -T api python -m eval.run_eval --model llama3.2:3b --limit 8
 ```
 
-## GPU
+`qwen3:4b-instruct` was selected: 29/29 on the tuned set and 6/6 on the held-out
+set, against 18/29 and 3/6 for `llama3.2:3b`. Numbers and caveats in
+`docs/ARCHITECTURE.md`.
+
+## Measured
+
+| Platform | Inference | Per request |
+|---|---|---|
+| macOS arm64 (Apple Silicon) | CPU | 3.5-5.6 s |
+| Fedora 43 x86_64 | CPU | 3.74-3.98 s |
+| Fedora 43 x86_64 + AMD RX 9070 XT | ROCm | 0.73-0.77 s |
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d --wait
-docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d --wait
+docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d
 ```
 
-Details: [docs/architecture/docker.md](docs/architecture/docker.md)
-
-## Verified Platforms
-
-| Platform | Inference | Time per request |
-|---|---|---|
-| macOS arm64 (Apple Silicon) | CPU | 4.5-5.6 s |
-| Fedora 43 x86_64 | CPU | 3.74-3.98 s |
-| Fedora 43 x86_64 + AMD RX 9070 XT | ROCm | **0.73-0.77 s** |
-
-On the RX 9070 XT Ollama detected `gfx1201` natively and offloaded all 37 layers,
-roughly a 5x speed-up over CPU on the same machine. The NVIDIA override has never
-been run on real hardware; only its compose syntax is validated.
-
-## Design Decisions
-
-**Ports and adapters.** `EmailSender` is a Protocol (`app/ports.py`). Production uses
-`SmtpEmailSender`; tests use `InMemoryEmailSender`. The agent selects a department
-and creates a subject; the tool forwards the trusted original body through the
-transport.
-
-**Body size enforced ahead of the app.** `MaxBodySizeMiddleware` buffers the raw
-ASGI body itself and rejects anything over `max_body_bytes` with a `413` before
-FastAPI is invoked at all, so an oversized request is never partially processed.
-A header-only `Content-Length` check would miss a chunked request or a declared
-length that understates the real body; buffering the actual bytes closes both.
-
-**Mailpit over MailHog.** Actively maintained, ships `/mailpit readyz`, no curl needed.
-
-**No task queue.** Two concurrent requests take roughly twice as long as one (see latency
-table). With `OLLAMA_NUM_PARALLEL=1` concurrency spreads the same throughput; the
-bottleneck is CPU/GPU, not HTTP.
-
-### Latency (qwen3:4b-instruct, warmed model, CPU)
-
-| Concurrent | Wall clock | Throughput |
-|---|---|---|
-| 1 | 4.5 s / 5.6 s | 0.22 / 0.18 req/s |
-| 2 | 9.4 s / 13.2 s | 0.21 / 0.15 req/s |
-
-### Model Selection (35 messages: 29 tuned + 6 held-out, CPU)
-
-| Model | Tuned | Held-out | s/msg | Fallbacks | Verdict |
-|---|---|---|---|---|---|
-| `qwen3:4b-instruct` | 29/29 (100%) | 6/6 (100%) | 9.2 | 0 | **selected** |
-| `llama3.2:3b` | 18/29 (62%) | 3/6 (50%) | 22.8 | 4 | rejected |
-| `qwen3:4b` | did not finish | n/a | >120 s (timeout) | n/a | rejected |
-
-This is a proof of concept for keeping inference local, so the models worth
-testing were bounded by what this hardware serves at an acceptable latency. A
-larger local model, or a hosted one behind the same OpenAI-compatible interface,
-would very likely score higher on the ambiguous boundary cases and lean on the
-retry path less often. That is a configuration change rather than a rewrite:
-`OLLAMA_MODEL` and `build_agent()` are the only places involved.
-
-Caveats on these numbers, and the reasoning behind the model ceiling:
-[docs/architecture/routing.md](docs/architecture/routing.md#model-ceiling)
-
-## Documentation
-
-- [agent.md](docs/architecture/agent.md): tool calling, Reply-To protection, enum constraint, retry, fallback
-- [routing.md](docs/architecture/routing.md): department scopes, routing rules, evaluation caveats
-- [docker.md](docs/architecture/docker.md): startup order, healthchecks, GPU overrides, dev stage
-- [testing.md](docs/architecture/testing.md): test layers, Docker vs local, llm marker
+The CUDA override has never been run on GPU hardware.
